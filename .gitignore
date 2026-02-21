@@ -1,0 +1,34 @@
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# macOS metadata
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# Logs
+*.log
+logs/
+*.tmp
+*.tmp.*
+
+# Backup images
+*.img
+*.img.gz
+*.size
+
+# Shell script artifacts
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+*.pid
+*.lock
+
+# VSCode or other editors
+.vscode/
+.idea/
