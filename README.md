@@ -1,5 +1,9 @@
 # Clone-NVMe-for-MacOS
 
+![Version](https://img.shields.io/badge/version-2.1.0-blue)
+![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 **OPNsense SSD Clone & Restore Utility for macOS:
 A robust and safety‑focused disk imaging tool for macOS that allows you to clone SSDs to compressed image files (.img.gz) and restore them back to new drives. Although designed for OPNsense and Deciso hardware appliances, the script should probably also work for cloning other systems (Linux, FreeBSD, router appliances, NAS boot drives, etc.) from NVMe, SATA or USB SSDs to an image file.
 
