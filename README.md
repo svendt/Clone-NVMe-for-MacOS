@@ -7,8 +7,8 @@
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey?logo=apple)](https://www.apple.com/macos/)
 [![Shell](https://img.shields.io/badge/shell-bash-blue?logo=gnu-bash)](https://www.gnu.org/software/bash/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tested on](https://img.shields.io/badge/tested%20on-macOS%20Sequoia-brightgreen)](https://www.apple.com/macos/)
-[![Latest Release](https://img.shields.io/github/v/release/yourusername/yourrepo?label=version&color=orange)](https://github.com/yourusername/yourrepo/releases/latest)
+[![Tested on](https://img.shields.io/badge/tested%20on-macOS%20Tahoe%2026.3-brightgreen)](https://www.apple.com/macos/)
+[![Latest Release](https://img.shields.io/github/v/release/svendt/Clone-NVMe-for-MacOS?label=version&color=orange)](https://github.com/svendt/Clone-NVMe-for-MacOS/releases/latest)
 
 Clone any external SSD to a compressed image file and restore it back — with GPT validation, SHA256 integrity checks, progress bars, speed limiting, and full audit logging.
 
