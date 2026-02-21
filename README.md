@@ -6,7 +6,7 @@ A robust and safety‑focused disk imaging tool for macOS that allows you to clo
 The utility includes hardened safety checks, GPT integrity validation, optional SHA256 verification, progress indicators, speed limiting, and full audit logging. It has been tested on the latest version of macOS Tahoe (26.3).**
 
 Before running the script, make it executable:
-chmod +x opnsenseclone_restore.shh
+chmod +x opnsense_clone_restore.shh
 
 Show the help screen:
 ./opnsense_clone_restore.sh –help
