@@ -2,7 +2,7 @@
 # =============================================================================
 # test_suite_clone_and_restore_svdt.sh — Test suite for clone_and_restore_svdt.sh
 # Emulates backup and restore with fake "SSD" images (no real hardware needed)
-# Version: 1.2.0
+# Version: 2.2.2
 # =============================================================================
 # HOW IT WORKS:
 #   Creates a temporary file as a fake SSD, then exercises the core logic of
@@ -41,10 +41,11 @@
 #   1.1.0 — filename corrected in header; no test changes
 #   1.2.0 — added section 15 (plist flag extraction, macOS/plutil)
 #            added section 16 (no-pv pipeline variant)
+#   2.2.0 - bring version in line with main script
 # =============================================================================
 
-TEST_SUITE_VERSION="1.2.0"
-MAIN_SCRIPT_VERSION="2.2.1"   # version of clone_and_restore_svdt.sh this suite targets
+TEST_SUITE_VERSION="2.2.2"
+MAIN_SCRIPT_VERSION="2.2.2"   # version of clone_and_restore_svdt.sh this suite targets
 
 set -euo pipefail
 
