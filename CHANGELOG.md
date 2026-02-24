@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventi
 
 ---
 
+## [2.3.0] — 2026-02-24
+
+### Added
+- Compression selection menu during backup: choose between `gzip` (default, single-core), `pigz` (parallel gzip, multi-core — requires `brew install pigz`), or no compression (raw `.img`, fastest write speed)
+- `pigz` auto-detection at startup — menu option shown as unavailable if not installed
+- Compression setting logged to audit log per run
+- Backup summary now shows selected compression method
+- Restore auto-detects compression from image extension (`.img.gz` → gzip/pigz decompression, `.img` → raw passthrough) — no manual selection needed on restore
+
+### Changed
+- Image file extension is now `.img.gz` for compressed backups and `.img` for uncompressed backups
+- All `gzip -c` / `gzip -dc` calls replaced with dynamic `$COMPRESS_CMD` / `$DECOMPRESS_CMD` variables throughout backup and restore pipelines
+- `gzip -t` integrity check skipped when compression is disabled (no-op for raw images)
+- All remaining `${PV_OPTS[@]}` expansions in restore section fixed for `set -u` compatibility (same fix as v2.2.2)
+
+---
+
 ## [2.2.2] — 2026-02-24
 
 ### Fixed

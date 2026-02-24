@@ -2,7 +2,7 @@
 # =============================================================================
 # test_suite_clone_and_restore_svdt.sh — Test suite for clone_and_restore_svdt.sh
 # Emulates backup and restore with fake "SSD" images (no real hardware needed)
-# Version: 2.2.2
+# Version: 2.3.0
 # =============================================================================
 # HOW IT WORKS:
 #   Creates a temporary file as a fake SSD, then exercises the core logic of
@@ -14,7 +14,7 @@
 #   (512b + 4K-native regression) · Size mismatch guard · Corruption detection
 #   Fast mode · .size sidecar validation · No-clobber guard · head -c readback
 #   Atomic rename · tee pipeline integrity · plist flag extraction (macOS)
-#   no-pv pipeline variant
+#   no-pv pipeline variant · compression modes (gzip / pigz / none)
 #
 # REQUIREMENTS: bash, dd, gzip, shasum, awk, hexdump (macOS) or od (Linux/macOS)
 # OPTIONAL:     plutil — required for section 15 (plist tests); auto-skipped if absent
@@ -33,6 +33,7 @@
 #   New sidecar file type              Add a test in section 3 (backup) + 4 (restore)
 #   Changed size validation logic      Update section 7
 #   Changed backup/restore pipeline    Update do_backup() / do_restore() helpers
+#   New compression mode added         Update section 17 + do_backup()/do_restore()
 #   Version bump in main script        Update MAIN_SCRIPT_VERSION below + add entry
 #                                      to the version history comment block
 #
@@ -42,10 +43,14 @@
 #   1.2.0 — added section 15 (plist flag extraction, macOS/plutil)
 #            added section 16 (no-pv pipeline variant)
 #   2.2.0 - bring version in line with main script
+#   2.2.2 - version bump matching main script fix (PV_OPTS unbound variable)
+#   2.3.0 - do_backup() / do_restore() now accept compression mode parameter
+#            added section 17 (compression mode tests: gzip / pigz / none)
+#            pigz auto-detected at startup; pigz sub-tests skipped if not installed
 # =============================================================================
 
-TEST_SUITE_VERSION="2.2.2"
-MAIN_SCRIPT_VERSION="2.2.2"   # version of clone_and_restore_svdt.sh this suite targets
+TEST_SUITE_VERSION="2.3.0"
+MAIN_SCRIPT_VERSION="2.3.0"   # version of clone_and_restore_svdt.sh this suite targets
 
 set -euo pipefail
 
@@ -61,6 +66,9 @@ NC="\033[0m"
 PASS=0
 FAIL=0
 SKIP=0
+
+# ─── pigz detection ───────────────────────────────────────────────────────────
+PIGZ_BIN=$(command -v pigz 2>/dev/null || true)
 
 # ─── Test directory ───────────────────────────────────────────────────────────
 TESTDIR=$(mktemp -d /tmp/svdt_test_XXXXXX)
@@ -105,18 +113,23 @@ read_gpt_hex() {
 }
 
 # Mirrors the backup pipeline in clone_and_restore_svdt.sh
+# Usage: do_backup <src> <img> [compress_cmd] [decompress_cmd] [ext]
 do_backup() {
   local src="$1" img="$2"
+  local compress_cmd="${3:-gzip -c}"
+  local decompress_cmd="${4:-gzip -dc}"
   local size; size=$(wc -c < "$src" | awk '{print $1}')
-  dd if="$src" bs=1048576 2>/dev/null | gzip -c > "$img"
+  dd if="$src" bs=1048576 2>/dev/null | $compress_cmd > "$img"
   echo "$size" > "${img}.size"
-  gzip -dc "$img" | shasum -a 256 | awk '{print $1}' > "${img}.sha256"
+  $decompress_cmd "$img" | shasum -a 256 | awk '{print $1}' > "${img}.sha256"
 }
 
 # Mirrors the restore pipeline in clone_and_restore_svdt.sh
+# Usage: do_restore <img> <dst> [decompress_cmd]
 do_restore() {
   local img="$1" dst="$2"
-  gzip -dc "$img" | dd of="$dst" bs=1048576 2>/dev/null
+  local decompress_cmd="${3:-gzip -dc}"
+  $decompress_cmd "$img" | dd of="$dst" bs=1048576 2>/dev/null
   sync
 }
 
@@ -568,6 +581,88 @@ nopv_secondary=$(read_gpt_hex "$NOPV_RESTORE" "$nopv_last_lba" 512)
 [[ "$nopv_secondary" == "$GPT_SIG" ]] \
   && ok "no-pv restore: secondary GPT signature intact" \
   || fail "no-pv restore: secondary GPT signature lost: $nopv_secondary"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "17. Compression modes (gzip / pigz / none)"
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests all three compression modes introduced in v2.3.0.
+# Each mode: backup → restore → byte-perfect SHA256 comparison.
+# pigz sub-tests are auto-skipped if pigz is not installed.
+
+COMP_SSD="$TESTDIR/comp_ssd.raw"
+make_fake_ssd "$COMP_SSD" $SSD_SIZE
+write_gpt_signatures "$COMP_SSD" $SSD_SIZE 512
+COMP_SRC_HASH=$(shasum -a 256 "$COMP_SSD" | awk '{print $1}')
+
+# ── 17a: gzip ────────────────────────────────────────────────────────────────
+GZIP_IMG="$TESTDIR/comp_gzip.img.gz"
+GZIP_RESTORE="$TESTDIR/comp_gzip_restore.raw"
+dd if=/dev/zero bs="$SSD_SIZE" count=1 2>/dev/null > "$GZIP_RESTORE"
+do_backup "$COMP_SSD" "$GZIP_IMG" "gzip -c" "gzip -dc"
+gzip -t "$GZIP_IMG" 2>/dev/null \
+  && ok "gzip mode: integrity check passes" \
+  || fail "gzip mode: integrity check failed"
+do_restore "$GZIP_IMG" "$GZIP_RESTORE" "gzip -dc"
+gzip_restored_hash=$(shasum -a 256 "$GZIP_RESTORE" | awk '{print $1}')
+[[ "$gzip_restored_hash" == "$COMP_SRC_HASH" ]] \
+  && ok "gzip mode: restored image is byte-perfect" \
+  || fail "gzip mode: SHA256 mismatch after restore"
+[[ "$GZIP_IMG" == *.img.gz ]] \
+  && ok "gzip mode: correct .img.gz extension" \
+  || fail "gzip mode: wrong extension (${GZIP_IMG})"
+
+# ── 17b: pigz ────────────────────────────────────────────────────────────────
+if [[ -z "$PIGZ_BIN" ]]; then
+  skip "pigz mode: pigz not installed — install via 'brew install pigz'"
+  skip "pigz mode: byte-perfect restore (pigz absent)"
+  skip "pigz mode: .img.gz extension (pigz absent)"
+else
+  PIGZ_IMG="$TESTDIR/comp_pigz.img.gz"
+  PIGZ_RESTORE="$TESTDIR/comp_pigz_restore.raw"
+  dd if=/dev/zero bs="$SSD_SIZE" count=1 2>/dev/null > "$PIGZ_RESTORE"
+  do_backup "$COMP_SSD" "$PIGZ_IMG" "$PIGZ_BIN -c" "$PIGZ_BIN -dc"
+  gzip -t "$PIGZ_IMG" 2>/dev/null \
+    && ok "pigz mode: integrity check passes (gzip-compatible output)" \
+    || fail "pigz mode: integrity check failed"
+  do_restore "$PIGZ_IMG" "$PIGZ_RESTORE" "$PIGZ_BIN -dc"
+  pigz_restored_hash=$(shasum -a 256 "$PIGZ_RESTORE" | awk '{print $1}')
+  [[ "$pigz_restored_hash" == "$COMP_SRC_HASH" ]] \
+    && ok "pigz mode: restored image is byte-perfect" \
+    || fail "pigz mode: SHA256 mismatch after restore"
+  [[ "$PIGZ_IMG" == *.img.gz ]] \
+    && ok "pigz mode: correct .img.gz extension" \
+    || fail "pigz mode: wrong extension (${PIGZ_IMG})"
+fi
+
+# ── 17c: no compression (raw .img) ───────────────────────────────────────────
+RAW_IMG="$TESTDIR/comp_raw.img"
+RAW_RESTORE="$TESTDIR/comp_raw_restore.raw"
+dd if=/dev/zero bs="$SSD_SIZE" count=1 2>/dev/null > "$RAW_RESTORE"
+do_backup "$COMP_SSD" "$RAW_IMG" "cat" "cat"
+raw_img_size=$(wc -c < "$RAW_IMG" | awk '{print $1}')
+[[ "$raw_img_size" -eq "$SSD_SIZE" ]] \
+  && ok "none mode: raw image size matches source ($raw_img_size bytes)" \
+  || fail "none mode: raw image size wrong (expected $SSD_SIZE, got $raw_img_size)"
+do_restore "$RAW_IMG" "$RAW_RESTORE" "cat"
+raw_restored_hash=$(shasum -a 256 "$RAW_RESTORE" | awk '{print $1}')
+[[ "$raw_restored_hash" == "$COMP_SRC_HASH" ]] \
+  && ok "none mode: restored image is byte-perfect" \
+  || fail "none mode: SHA256 mismatch after restore"
+[[ "$RAW_IMG" == *.img && "$RAW_IMG" != *.img.gz ]] \
+  && ok "none mode: correct .img extension (no .gz)" \
+  || fail "none mode: wrong extension (${RAW_IMG})"
+
+# ── 17d: cross-check all three produce identical restored content ─────────────
+if [[ -n "$PIGZ_BIN" ]]; then
+  [[ "$gzip_restored_hash" == "$pigz_restored_hash" && \
+     "$gzip_restored_hash" == "$raw_restored_hash" ]] \
+    && ok "All three compression modes produce identical restored content" \
+    || fail "Compression mode cross-check: hashes differ between modes"
+else
+  [[ "$gzip_restored_hash" == "$raw_restored_hash" ]] \
+    && ok "gzip and none modes produce identical restored content" \
+    || fail "gzip vs none cross-check: hashes differ"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SUMMARY

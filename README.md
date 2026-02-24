@@ -48,6 +48,8 @@ chmod +x clone_and_restore_svdt.sh
 > For Apple Silicon Macs, an NVMe enclosure with the **Realtek RTL9210B** chipset gives the best transfer speeds.  
 > Example: [UGREEN NVMe Enclosure (Amazon.be)](https://www.amazon.com.be/dp/B09T8P9LKQ)
 
+> ⚡ **Speed tip:** Install `pigz` (`brew install pigz`) and select it as compression mode. Single-threaded `gzip` saturates one CPU core and limits backup speed to ~30 MB/s even on fast USB3 hardware. `pigz` uses all CPU cores and removes that bottleneck entirely.
+
 ---
 
 ## ✨ Features
@@ -57,7 +59,7 @@ chmod +x clone_and_restore_svdt.sh
 | Feature | Details |
 |---|---|
 | Byte-accurate cloning | Uses raw block devices (`/dev/rdiskX`) via `dd` |
-| Compression | gzip on-the-fly; integrity verified after write |
+| Compression | Choose `gzip` (default), `pigz` (multi-core, faster), or none (raw `.img`) |
 | Metadata | `.size` sidecar auto-generated for fast restore validation |
 | Integrity | Optional SHA256 hash saved to `.sha256` sidecar file |
 | Progress | ETA, throughput, percentage via `pv` (if installed) |
@@ -96,22 +98,24 @@ Run script
     │                      Choose dry-run or real
     │                      Choose FAST mode (skip SHA256)
     │                      Set optional speed limit
+    │                      Choose compression (gzip / pigz / none)
     │                      Script unmounts disk
-    │                      dd | gzip ──► .img.gz
-    │                      gzip integrity check
+    │                      dd | gzip/pigz/cat ──► .img.gz or .img
+    │                      Integrity check (gzip/pigz only)
     │                      .size sidecar written
     │                      .sha256 sidecar written
     │                      Disk ejected
     │
     └─ [2] RESTORE ─────► Select target disk
-                           Provide path to .img.gz
-                           gzip integrity validated
+                           Provide path to .img.gz or .img
+                           Compression auto-detected from extension
+                           gzip integrity validated (.img.gz only)
                            Size checked vs. target
                            Set optional speed limit
                            Summary: block size, pv, SHA256
                            Type "I AM SURE" to confirm
                            Disk unmounted
-                           gzip -dc | dd ──► disk
+                           decompress | dd ──► disk
                            GPT headers validated
                            SHA256 verified vs. sidecar
                            diskutil verifyDisk
@@ -126,6 +130,7 @@ Run script
 |---|---|
 | **Dry-run** | Simulates the full process without writing anything — great for verifying disk selection and estimating duration |
 | **FAST mode** | Skips SHA256 hashing for maximum speed. Recommended only when integrity verification isn't required |
+| **Compression** | Choose `gzip` (default, single-core), `pigz` (multi-core, fastest for USB3), or `none` (raw `.img`, no compression). Restore auto-detects the mode from the file extension. |
 | **Speed limit** | Requires `pv`. Caps throughput in MB/s for both backup and restore — useful on slow USB enclosures or when avoiding thermal throttling. Only prompted when `pv` is installed. |
 | **Progress display** | With `pv`: ETA, %, throughput, total bytes. Without `pv`: press Ctrl+T for a status update |
 | **`--help`** | Show full help screen and exit |
@@ -139,11 +144,14 @@ Each backup produces up to three files — keep them together when moving a back
 
 | File | Purpose |
 |---|---|
-| `prefix_date_hash.img.gz` | The compressed disk image |
-| `prefix_date_hash.img.gz.size` | Uncompressed byte count — enables fast restore size validation |
-| `prefix_date_hash.img.gz.sha256` | SHA256 hash of uncompressed data — used for bit-perfect restore verification |
+| `prefix_date_hash.img.gz` | Compressed disk image (gzip or pigz mode) |
+| `prefix_date_hash.img` | Raw disk image (no compression mode) |
+| `prefix_date_hash.img.gz.size` / `.img.size` | Uncompressed byte count — enables fast restore size validation |
+| `prefix_date_hash.img.gz.sha256` / `.img.sha256` | SHA256 hash of uncompressed data — used for bit-perfect restore verification |
 
 > The `.sha256` sidecar is skipped when running in FAST mode. If it is present at restore time, the restore pipeline is simplified (no tee overhead) and the expected hash is shown in the pre-restore summary.
+> 
+> At restore time the compression method is **auto-detected from the file extension** — no manual selection needed.
 
 ---
 
@@ -169,6 +177,8 @@ diskutil  dd  gzip  shasum  awk  head  wc  tee  hexdump  plutil
 
 `pv` enables the progress bar, ETA, throughput display, and speed limiting. Without it the script falls back to basic `dd` status output.
 
+`pigz` (parallel gzip) uses all CPU cores for compression and is **strongly recommended for USB3 drives**. Without it, single-threaded `gzip` will bottleneck throughput and limit backup speed to ~30 MB/s regardless of your hardware.
+
 **Step 1 — Install Homebrew** (if not already installed):
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -181,12 +191,12 @@ echo 'eval "$(/opt/homebrew/bin/brew shellenv zsh)"' >> ~/.zprofile
 eval "$(/opt/homebrew/bin/brew shellenv zsh)"
 ```
 
-**Step 3 — Install pv:**
+**Step 3 — Install optional tools:**
 ```bash
-brew install pv
+brew install pv pigz
 ```
 
-The script auto-detects `pv` on every run — no configuration needed.
+Both tools are auto-detected on every run — no configuration needed. `pigz` is only available as a compression option when installed.
 
 ---
 

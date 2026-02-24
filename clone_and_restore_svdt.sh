@@ -6,7 +6,7 @@
 # Works with Linux, FreeBSD, router/firewall appliances, NAS boot drives, and any
 # NVMe, SATA or USB SSD visible in diskutil list.
 # See README.md for full documentation. See CHANGELOG.md for version history.
-SCRIPT_VERSION="2.2.1"
+SCRIPT_VERSION="2.3.0"
 SCRIPT_NAME="SSD Clone & Restore Utility"
 SCRIPT_YEAR="2026"
 SCRIPT_AUTHOR="SVDT"
@@ -65,8 +65,9 @@ else
 
 fi
 
-# Capture pv full path before restricting PATH (Homebrew installs to /opt/homebrew/bin on Apple Silicon)
+# Capture pv and pigz full paths before restricting PATH (Homebrew installs to /opt/homebrew/bin on Apple Silicon)
 PV_BIN=$(command -v pv 2>/dev/null || true)
+PIGZ_BIN=$(command -v pigz 2>/dev/null || true)
 
 # Lock down PATH to trusted system binaries
 export PATH="/usr/sbin:/usr/bin:/bin:/sbin"
@@ -84,6 +85,10 @@ FAST_MODE=0
 DRY_RUN=0
 USE_PV=0
 PV_OPTS=()
+COMPRESS_CMD=""
+DECOMPRESS_CMD=""
+IMAGE_EXT=""
+USE_COMPRESSION=1
 SUDO_KEEPALIVE_PID=""
 
 #############################################
@@ -439,6 +444,55 @@ if [[ "$USE_PV" -eq 1 ]]; then
 fi
 
 #############################################
+# COMPRESSION
+#############################################
+
+echo
+echo -e "${BLUE}Compression options:${NC}"
+echo -e "  ${GREEN}1${NC}) gzip   — standard, single-core (default)"
+if [[ -n "$PIGZ_BIN" ]]; then
+  echo -e "  ${GREEN}2${NC}) pigz   — parallel gzip, multi-core (faster)"
+else
+  echo -e "  ${YELLOW}2${NC}) pigz   — not installed (brew install pigz)"
+fi
+echo -e "  ${GREEN}3${NC}) none   — no compression (fastest, largest file)"
+
+read -rp "Choose compression [1/2/3, default 1]: " COMP_CHOICE
+COMP_CHOICE=${COMP_CHOICE:-1}
+
+case "$COMP_CHOICE" in
+  2)
+    if [[ -z "$PIGZ_BIN" ]]; then
+      echo -e "${YELLOW}pigz not found — falling back to gzip.${NC}"
+      COMPRESS_CMD="gzip -c"
+      DECOMPRESS_CMD="gzip -dc"
+      IMAGE_EXT=".img.gz"
+      USE_COMPRESSION=1
+    else
+      COMPRESS_CMD="$PIGZ_BIN -c"
+      DECOMPRESS_CMD="$PIGZ_BIN -dc"
+      IMAGE_EXT=".img.gz"
+      USE_COMPRESSION=1
+      echo -e "${GREEN}Using pigz (parallel gzip).${NC}"
+    fi
+    ;;
+  3)
+    COMPRESS_CMD="cat"
+    DECOMPRESS_CMD="cat"
+    IMAGE_EXT=".img"
+    USE_COMPRESSION=0
+    echo -e "${YELLOW}No compression — image will be stored as raw .img file.${NC}"
+    ;;
+  *)
+    COMPRESS_CMD="gzip -c"
+    DECOMPRESS_CMD="gzip -dc"
+    IMAGE_EXT=".img.gz"
+    USE_COMPRESSION=1
+    echo -e "${GREEN}Using gzip compression.${NC}"
+    ;;
+esac
+
+#############################################
 # LOG RUN PARAMETERS (AUDIT)
 #############################################
 
@@ -465,7 +519,7 @@ if [[ "$MODE" == "1" ]]; then
   SALT=$(head -c 16 /dev/urandom | shasum -a 256 | awk '{print $1}')
   SHORT_HASH=$(printf "%s" "${DISK}_${TIMESTAMP}_${SALT}" | shasum -a 256 | awk '{print $1}' | cut -c1-8)
 
-  DEFAULT_IMAGE="${HOME}/${PREFIX}_${TIMESTAMP}_${SHORT_HASH}.img.gz"
+  DEFAULT_IMAGE="${HOME}/${PREFIX}_${TIMESTAMP}_${SHORT_HASH}${IMAGE_EXT}"
 
   echo -e "${BLUE}Backup image will be:${NC} ${GREEN}${DEFAULT_IMAGE}${NC}"
   read -rp "Image path [default above]: " IMAGE
@@ -479,14 +533,13 @@ if [[ "$MODE" == "1" ]]; then
 
   {
     echo "image_path=${IMAGE}"
+    echo "compression=${IMAGE_EXT}"
   } >> "$LOG"
-
-  echo
-  echo -e "${BLUE}=== Backup summary ===${NC}"
   echo -e "Mode:        ${GREEN}backup${NC}"
   echo -e "Source disk: ${GREEN}${DEVICE}${NC}"
   echo -e "Disk size:   ${GREEN}${DISK_SIZE} bytes${NC}"
   echo -e "Image file:  ${GREEN}${IMAGE}${NC}"
+  echo -e "Compression: ${GREEN}$([[ $USE_COMPRESSION -eq 1 ]] && echo "$COMPRESS_CMD" || echo "none (raw .img)")${NC}"
   echo -e "FAST mode:   ${GREEN}$([[ $FAST_MODE -eq 1 ]] && echo enabled || echo disabled)${NC}"
   echo -e "Dry-run:     ${GREEN}$([[ $DRY_RUN -eq 1 ]] && echo yes || echo no)${NC}"
   echo
@@ -547,11 +600,11 @@ if [[ "$MODE" == "1" ]]; then
     echo -e "${BLUE}Starting backup with progress + ETA...${NC}"
     sudo dd if="$IO_DEVICE" bs=4m 2>/dev/null \
       | "$PV_BIN" -p -t -e -r -b -s "$DISK_SIZE" ${PV_OPTS[@]+"${PV_OPTS[@]}"} \
-      | gzip -c > "$TMP_IMAGE"
+      | $COMPRESS_CMD > "$TMP_IMAGE"
   else
     echo -e "${YELLOW}pv not found — limited progress output. Press Ctrl+T for a status update.${NC}"
     sudo dd if="$IO_DEVICE" bs=4m \
-      | gzip -c > "$TMP_IMAGE"
+      | $COMPRESS_CMD > "$TMP_IMAGE"
   fi
 
   echo -e "${BLUE}Backup write completed. Flushing write buffers...${NC}"
@@ -561,8 +614,10 @@ if [[ "$MODE" == "1" ]]; then
   # VERIFY + FINALIZE
   #############################################
 
-  echo -e "${BLUE}Verifying compressed image integrity...${NC}"
-  gzip -t "$TMP_IMAGE" || error_exit "gzip integrity test failed"
+  if [[ "$USE_COMPRESSION" -eq 1 ]]; then
+    echo -e "${BLUE}Verifying compressed image integrity...${NC}"
+    gzip -t "$TMP_IMAGE" || error_exit "gzip integrity test failed"
+  fi
 
   echo -e "${BLUE}Finalizing image file...${NC}"
 
@@ -583,7 +638,7 @@ if [[ "$MODE" == "1" ]]; then
 
   if [[ "$FAST_MODE" -eq 0 ]]; then
     echo -e "${BLUE}Calculating SHA256 hash (this may take several minutes for large images)...${NC}"
-    IMAGE_HASH=$(gzip -dc "$IMAGE" | shasum -a 256 | awk '{print $1}')
+    IMAGE_HASH=$($DECOMPRESS_CMD "$IMAGE" | shasum -a 256 | awk '{print $1}')
     echo "IMAGE SHA256: $IMAGE_HASH" | tee -a "$LOG"
     echo "$IMAGE_HASH" > "${IMAGE}.sha256"
     echo -e "${GREEN}SHA256 saved to: ${IMAGE}.sha256${NC}"
@@ -612,11 +667,25 @@ elif [[ "$MODE" == "2" ]]; then
   # RESTORE
   #############################################
 
-  read -rp "Image path (.img.gz): " IMAGE
+  read -rp "Image path (.img.gz or .img): " IMAGE
   [[ "$IMAGE" = /* ]] || error_exit "Image path must be absolute"
   [[ -f "$IMAGE" ]] || error_exit "Image not found: $IMAGE"
 
-  gzip -t "$IMAGE" || error_exit "gzip integrity check failed for image"
+  # Auto-detect compression based on file extension
+  if [[ "$IMAGE" == *.img.gz ]]; then
+    COMPRESS_CMD="gzip -c"
+    DECOMPRESS_CMD="gzip -dc"
+    USE_COMPRESSION=1
+    echo -e "${BLUE}Detected compressed image (.img.gz)${NC}"
+    gzip -t "$IMAGE" || error_exit "gzip integrity check failed for image"
+  elif [[ "$IMAGE" == *.img ]]; then
+    COMPRESS_CMD="cat"
+    DECOMPRESS_CMD="cat"
+    USE_COMPRESSION=0
+    echo -e "${BLUE}Detected raw image (.img) — no decompression needed${NC}"
+  else
+    error_exit "Unrecognized image extension — expected .img.gz or .img"
+  fi
 
   #############################################
   # IMAGE SIZE + COMPATIBILITY CHECK
@@ -636,7 +705,7 @@ elif [[ "$MODE" == "2" ]]; then
     fi
   else
     echo -e "${YELLOW}Warning: No .size metadata found — calculating via full decompression (slow for large images)...${NC}"
-    IMAGE_SIZE=$(gzip -dc "$IMAGE" | wc -c | awk '{print $1}')
+    IMAGE_SIZE=$($DECOMPRESS_CMD "$IMAGE" | wc -c | awk '{print $1}')
     [[ -n "$IMAGE_SIZE" && "$IMAGE_SIZE" -gt 0 ]] \
       || error_exit "Unable to determine uncompressed image size"
   fi
@@ -720,12 +789,12 @@ elif [[ "$MODE" == "2" ]]; then
       # .sha256 sidecar available — no need to tee during write, hash already known
       if [[ "$USE_PV" -eq 1 ]]; then
         echo -e "${BLUE}Progress:${NC}"
-        gzip -dc "$IMAGE" \
+        $DECOMPRESS_CMD "$IMAGE" \
           | "$PV_BIN" -p -t -e -r -b -s "$IMAGE_SIZE" ${PV_OPTS[@]+"${PV_OPTS[@]}"} \
           | sudo dd of="$IO_DEVICE" bs=4m 2>/dev/null
       else
         echo -e "${YELLOW}pv not found — limited progress output. Press Ctrl+T for a status update.${NC}"
-        gzip -dc "$IMAGE" \
+        $DECOMPRESS_CMD "$IMAGE" \
           | sudo dd of="$IO_DEVICE" bs=4m
       fi
     else
@@ -733,13 +802,13 @@ elif [[ "$MODE" == "2" ]]; then
       TMP_HASH=$(mktemp) || error_exit "Failed to create temporary hash file"
       if [[ "$USE_PV" -eq 1 ]]; then
         echo -e "${BLUE}Progress:${NC}"
-        gzip -dc "$IMAGE" \
+        $DECOMPRESS_CMD "$IMAGE" \
           | tee >(shasum -a 256 | awk '{print $1}' > "$TMP_HASH") \
           | "$PV_BIN" -p -t -e -r -b -s "$IMAGE_SIZE" ${PV_OPTS[@]+"${PV_OPTS[@]}"} \
           | sudo dd of="$IO_DEVICE" bs=4m 2>/dev/null
       else
         echo -e "${YELLOW}pv not found — limited progress output. Press Ctrl+T for a status update.${NC}"
-        gzip -dc "$IMAGE" \
+        $DECOMPRESS_CMD "$IMAGE" \
           | tee >(shasum -a 256 | awk '{print $1}' > "$TMP_HASH") \
           | sudo dd of="$IO_DEVICE" bs=4m
       fi
@@ -747,12 +816,12 @@ elif [[ "$MODE" == "2" ]]; then
   else
     if [[ "$USE_PV" -eq 1 ]]; then
       echo -e "${BLUE}Progress:${NC}"
-      gzip -dc "$IMAGE" \
+      $DECOMPRESS_CMD "$IMAGE" \
         | "$PV_BIN" -p -t -e -r -b -s "$IMAGE_SIZE" ${PV_OPTS[@]+"${PV_OPTS[@]}"} \
         | sudo dd of="$IO_DEVICE" bs=4m 2>/dev/null
     else
       echo -e "${YELLOW}pv not found — limited progress output. Press Ctrl+T for a status update.${NC}"
-      gzip -dc "$IMAGE" \
+      $DECOMPRESS_CMD "$IMAGE" \
         | sudo dd of="$IO_DEVICE" bs=4m
     fi
   fi
