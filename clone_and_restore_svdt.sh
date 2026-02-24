@@ -546,7 +546,7 @@ if [[ "$MODE" == "1" ]]; then
   if [[ "$USE_PV" -eq 1 ]]; then
     echo -e "${BLUE}Starting backup with progress + ETA...${NC}"
     sudo dd if="$IO_DEVICE" bs=4m 2>/dev/null \
-      | "$PV_BIN" -p -t -e -r -b -s "$DISK_SIZE" "${PV_OPTS[@]}" \
+      | "$PV_BIN" -p -t -e -r -b -s "$DISK_SIZE" ${PV_OPTS[@]+"${PV_OPTS[@]}"} \
       | gzip -c > "$TMP_IMAGE"
   else
     echo -e "${YELLOW}pv not found — limited progress output. Press Ctrl+T for a status update.${NC}"
@@ -721,7 +721,7 @@ elif [[ "$MODE" == "2" ]]; then
       if [[ "$USE_PV" -eq 1 ]]; then
         echo -e "${BLUE}Progress:${NC}"
         gzip -dc "$IMAGE" \
-          | "$PV_BIN" -p -t -e -r -b -s "$IMAGE_SIZE" "${PV_OPTS[@]}" \
+          | "$PV_BIN" -p -t -e -r -b -s "$IMAGE_SIZE" ${PV_OPTS[@]+"${PV_OPTS[@]}"} \
           | sudo dd of="$IO_DEVICE" bs=4m 2>/dev/null
       else
         echo -e "${YELLOW}pv not found — limited progress output. Press Ctrl+T for a status update.${NC}"
@@ -735,7 +735,7 @@ elif [[ "$MODE" == "2" ]]; then
         echo -e "${BLUE}Progress:${NC}"
         gzip -dc "$IMAGE" \
           | tee >(shasum -a 256 | awk '{print $1}' > "$TMP_HASH") \
-          | "$PV_BIN" -p -t -e -r -b -s "$IMAGE_SIZE" "${PV_OPTS[@]}" \
+          | "$PV_BIN" -p -t -e -r -b -s "$IMAGE_SIZE" ${PV_OPTS[@]+"${PV_OPTS[@]}"} \
           | sudo dd of="$IO_DEVICE" bs=4m 2>/dev/null
       else
         echo -e "${YELLOW}pv not found — limited progress output. Press Ctrl+T for a status update.${NC}"
@@ -748,7 +748,7 @@ elif [[ "$MODE" == "2" ]]; then
     if [[ "$USE_PV" -eq 1 ]]; then
       echo -e "${BLUE}Progress:${NC}"
       gzip -dc "$IMAGE" \
-        | "$PV_BIN" -p -t -e -r -b -s "$IMAGE_SIZE" "${PV_OPTS[@]}" \
+        | "$PV_BIN" -p -t -e -r -b -s "$IMAGE_SIZE" ${PV_OPTS[@]+"${PV_OPTS[@]}"} \
         | sudo dd of="$IO_DEVICE" bs=4m 2>/dev/null
     else
       echo -e "${YELLOW}pv not found — limited progress output. Press Ctrl+T for a status update.${NC}"

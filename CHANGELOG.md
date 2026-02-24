@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventi
 
 ---
 
+## [2.2.2] — 2026-02-24
+
+### Fixed
+- `${PV_OPTS[@]}` expansions on lines 549, 724, 738 and 751 caused an `unbound variable` crash under `set -u` when no bandwidth limit was set and the array was empty. Fixed by replacing `"${PV_OPTS[@]}"` with `${PV_OPTS[@]+"${PV_OPTS[@]}"}` — the array is now only expanded when it contains at least one element.
+
+---
+
 ## [2.2.1] — 2026-02-21
 
 ### Fixed
